@@ -2,16 +2,16 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const { Pool } = require('pg');
+const nodemailer = require('nodemailer');
 require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 5000;
 
-// Middleware
 app.use(cors());
 app.use(bodyParser.json());
 
-// Database connection
+// PostgreSQL setup
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
@@ -19,8 +19,41 @@ const pool = new Pool({
   }
 });
 
+// Nodemailer setup
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  }
+});
 
+const sendEmail = (subject, htmlContent) => {
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: process.env.EMAIL_RECIVER,
+    subject,
+    html: htmlContent
+  };
 
+  transporter.sendMail(mailOptions, (error, info) => {
+    if (error) {
+      return console.error('Error sending email:', error);
+    }
+    console.log('Email sent:', info.response);
+  });
+};
+
+const formatAsTable = (dataObj) => {
+  return `
+    <table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse;">
+      ${Object.entries(dataObj).map(([key, value]) =>
+        `<tr><th align="left">${key}</th><td>${value}</td></tr>`).join('')}
+    </table>
+  `;
+};
+
+// Create tables if not exist
 pool.query(
   `
     CREATE TABLE IF NOT EXISTS study (
@@ -47,7 +80,6 @@ pool.query(
   }
 );
 
-// Create work_profiles table
 pool.query(
   `
     CREATE TABLE IF NOT EXISTS work_profiles (
@@ -70,10 +102,29 @@ pool.query(
   }
 );
 
-// Existing study endpoint
+pool.query(
+  `
+    CREATE TABLE IF NOT EXISTS invest (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(100),
+      email VARCHAR(100),
+      country VARCHAR(100),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `,
+  (err, res) => {
+    if (err) {
+      console.error('Error creating invest table:', err);
+    } else {
+      console.log('Invest table created or already exists');
+    }
+  }
+);
+
+// Routes
 app.post('/submit-form', (req, res) => {
   const formData = req.body;
-  console.log('Received study form data:', formData); // Log received data
+  console.log('Received study form data:', formData);
 
   const query = `
     INSERT INTO study (
@@ -105,8 +156,17 @@ app.post('/submit-form', (req, res) => {
         error: err.message
       });
     }
-    
+
     console.log('Study data inserted successfully:', result.rows[0]);
+
+    // Send email
+    const emailSubject = 'Study Abroad Inquiry';
+    const emailBody = `
+      <p>For Study: This person wants to study abroad. Their details are:</p>
+      ${formatAsTable(formData)}
+    `;
+    sendEmail(emailSubject, emailBody);
+
     res.status(200).json({
       success: true,
       message: 'Form submitted successfully',
@@ -115,13 +175,12 @@ app.post('/submit-form', (req, res) => {
   });
 });
 
-// New work profile endpoint
 app.post('/submit-work-form', (req, res) => {
   const formData = req.body;
-  console.log('Received work profile data:', formData); // Log received data
+  console.log('Received work profile data:', formData);
 
   const query = `
-    INSERT INTO work (
+    INSERT INTO work_profiles (
       occupation, education, experience, name, email, phone
     ) VALUES ($1, $2, $3, $4, $5, $6)
     RETURNING *
@@ -145,8 +204,17 @@ app.post('/submit-work-form', (req, res) => {
         error: err.message
       });
     }
-    
+
     console.log('Work profile data inserted successfully:', result.rows[0]);
+
+    // Send email
+    const emailSubject = 'Work Abroad Inquiry';
+    const emailBody = `
+      <p>For Work: This person wants to work abroad. Their details are:</p>
+      ${formatAsTable(formData)}
+    `;
+    sendEmail(emailSubject, emailBody);
+
     res.status(200).json({
       success: true,
       message: 'Work profile saved successfully',
@@ -155,12 +223,9 @@ app.post('/submit-work-form', (req, res) => {
   });
 });
 
-
-
-// Add this new route for investment forms
 app.post('/submit-invest-form', (req, res) => {
   const { name, email, country } = req.body;
-  
+
   const query = `
     INSERT INTO invest (name, email, country)
     VALUES ($1, $2, $3)
@@ -176,8 +241,17 @@ app.post('/submit-invest-form', (req, res) => {
         error: err.message
       });
     }
-    
+
     console.log('Investment data inserted successfully:', result.rows[0]);
+
+    // Send email
+    const emailSubject = 'Investment Abroad Inquiry';
+    const emailBody = `
+      <p>For Investment: This person wants to invest abroad. Their details are:</p>
+      ${formatAsTable({ name, email, country })}
+    `;
+    sendEmail(emailSubject, emailBody);
+
     res.status(200).json({
       success: true,
       message: 'Investment inquiry submitted successfully',
@@ -189,3 +263,4 @@ app.post('/submit-invest-form', (req, res) => {
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
 });
+
